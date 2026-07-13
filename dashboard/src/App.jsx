@@ -787,7 +787,7 @@ function ConsoleDrawer({ open, onClose }) {
 }
 
 export default function App() {
-  const [portfolio, refetchPortfolio] = useApi('/api/portfolio', 60_000)
+  const [portfolio, refetchPortfolio] = useApi('/api/portfolio', 180_000)
   const [status] = useApi('/api/status', 5_000)
   const [scan, refetchScan] = useApi('/api/scan', 120_000)
   const [scanning, setScanning] = useState(false)
