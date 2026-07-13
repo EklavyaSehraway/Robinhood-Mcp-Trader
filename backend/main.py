@@ -16,8 +16,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import deque
 from datetime import datetime, timezone, timedelta
+from itertools import count
 from pathlib import Path
+from threading import Lock
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,6 +33,41 @@ import strategy
 from robinhood_mcp import robinhood
 from universe import get_universe
 
+
+# --- In-memory log buffer for the dashboard console ---------------------------
+class RingBufferLogHandler(logging.Handler):
+    """Keeps the most recent log records in memory so the dashboard can
+    stream them. Each record gets a monotonic id for incremental polling."""
+
+    def __init__(self, capacity: int = 2000):
+        super().__init__()
+        self._buf: deque = deque(maxlen=capacity)
+        self._counter = count(1)
+        self._lock = Lock()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+        except Exception:
+            return
+        with self._lock:
+            self._buf.append({
+                "id": next(self._counter),
+                "t": record.created,
+                "level": record.levelname,
+                "name": record.name,
+                "msg": msg,
+            })
+
+    def get_since(self, after_id: int, limit: int = 500) -> list[dict]:
+        with self._lock:
+            items = [r for r in self._buf if r["id"] > after_id]
+        return items[-limit:]
+
+
+_console_handler = RingBufferLogHandler()
+_console_handler.setFormatter(logging.Formatter("%(message)s"))
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)-14s │ %(message)s",
@@ -41,6 +79,10 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 logging.getLogger("peewee").setLevel(logging.WARNING)
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
+# Attach the ring buffer to the root logger so it captures every module's logs
+logging.getLogger().addHandler(_console_handler)
+
 log = logging.getLogger("trader")
 
 SCAN_INTERVAL = 10 * 60
@@ -209,6 +251,13 @@ def status():
         "mode": paper_trader.load_state().get("mode", "paper"),
         "errors": _engine_state["errors"],
     }
+
+
+@app.get("/api/logs")
+def logs(after: int = 0):
+    """Return log records newer than `after` (their id). The dashboard
+    console polls this with the highest id it has seen."""
+    return {"logs": _console_handler.get_since(after)}
 
 
 @app.get("/api/portfolio")

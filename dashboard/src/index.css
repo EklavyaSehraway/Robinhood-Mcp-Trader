@@ -170,6 +170,51 @@ button:disabled { opacity: 0.5; cursor: default; }
   padding: 2px 8px; border: 1px solid var(--gridline); border-radius: 999px;
 }
 
+/* --- Backend console drawer --- */
+.with-console { padding-bottom: 42vh; }
+
+.console-drawer {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 90;
+  height: 40vh; display: flex; flex-direction: column;
+  background: #0a0a0a; border-top: 1px solid var(--border);
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.6);
+}
+.console-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 16px; border-bottom: 1px solid var(--gridline);
+  background: var(--surface); flex-shrink: 0;
+}
+.console-title {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 600;
+}
+.console-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--good);
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+.console-count { color: var(--text-muted); font-weight: 400; font-size: 11px; }
+.console-actions { display: inline-flex; align-items: center; gap: 10px; }
+.console-toggle {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; color: var(--text-muted); cursor: pointer;
+}
+
+.console-body {
+  flex: 1; overflow-y: auto; padding: 8px 16px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px; line-height: 1.5;
+}
+.console-empty { color: var(--text-muted); padding: 20px 0; text-align: center; }
+.console-line { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-word; }
+.console-time { color: var(--text-muted); flex-shrink: 0; }
+.console-lvl { flex-shrink: 0; width: 62px; font-weight: 600; }
+.console-msg { color: var(--text-secondary); }
+.log-info .console-lvl { color: var(--series-1); }
+.log-warn .console-lvl { color: var(--warning); }
+.log-error .console-lvl { color: var(--critical); }
+.log-error .console-msg { color: var(--critical); }
+
 .badge-btn {
   background: transparent; cursor: pointer; font-weight: 600;
   letter-spacing: 0.03em; padding: 2px 10px; font-size: 12px;

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, ReferenceLine,
@@ -714,6 +714,78 @@ function RefreshCountdown({ status }) {
   )
 }
 
+function ConsoleDrawer({ open, onClose }) {
+  const [logs, setLogs] = useState([])
+  const [autoscroll, setAutoscroll] = useState(true)
+  const lastId = useRef(0)
+  const bodyRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/logs?after=${lastId.current}`)
+        const d = await r.json()
+        if (alive && d.logs?.length) {
+          lastId.current = d.logs[d.logs.length - 1].id
+          setLogs((prev) => [...prev, ...d.logs].slice(-1000))
+        }
+      } catch { /* ignore */ }
+    }
+    poll()
+    const iv = setInterval(poll, 1500)
+    return () => { alive = false; clearInterval(iv) }
+  }, [open])
+
+  useEffect(() => {
+    if (autoscroll && bodyRef.current) {
+      bodyRef.current.scrollTop = bodyRef.current.scrollHeight
+    }
+  }, [logs, autoscroll])
+
+  if (!open) return null
+
+  const levelClass = (lvl) =>
+    lvl === 'ERROR' || lvl === 'CRITICAL' ? 'log-error'
+      : lvl === 'WARNING' ? 'log-warn' : 'log-info'
+
+  return (
+    <div className="console-drawer">
+      <div className="console-head">
+        <span className="console-title">
+          <span className="console-dot" /> Backend Console
+          <span className="console-count">{logs.length} lines</span>
+        </span>
+        <span className="console-actions">
+          <label className="console-toggle">
+            <input type="checkbox" checked={autoscroll}
+              onChange={(e) => setAutoscroll(e.target.checked)} />
+            Auto-scroll
+          </label>
+          <button className="btn-header" onClick={() => setLogs([])}>Clear</button>
+          <button className="btn-header" onClick={onClose}>Close ▾</button>
+        </span>
+      </div>
+      <div className="console-body" ref={bodyRef}>
+        {logs.length === 0 ? (
+          <div className="console-empty">Waiting for backend activity…</div>
+        ) : (
+          logs.map((l) => (
+            <div className={`console-line ${levelClass(l.level)}`} key={l.id}>
+              <span className="console-time">
+                {new Date(l.t * 1000).toLocaleTimeString('en-US', { hour12: false })}
+              </span>
+              <span className="console-lvl">{l.level}</span>
+              <span className="console-msg">{l.msg}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [portfolio, refetchPortfolio] = useApi('/api/portfolio', 10_000)
   const [status] = useApi('/api/status', 5_000)
@@ -721,6 +793,7 @@ export default function App() {
   const [scanning, setScanning] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showGuide, setShowGuide] = useState(false)
+  const [showConsole, setShowConsole] = useState(false)
 
   const runScan = async () => {
     setScanning(true)
@@ -746,6 +819,9 @@ export default function App() {
             {status?.market_open ? 'Market open' : 'Market closed'}
           </span>
           <RefreshCountdown status={status} />
+          <button className="btn-header" onClick={() => setShowConsole((v) => !v)}>
+            {showConsole ? 'Console ▾' : 'Console'}
+          </button>
           <button className="btn-header" onClick={() => setShowGuide(true)}>Setup Guide</button>
           <button className="btn-header" onClick={() => setShowSettings(true)}>Settings</button>
         </div>
@@ -754,11 +830,15 @@ export default function App() {
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
       {showGuide && <SetupGuideModal onClose={() => setShowGuide(false)} />}
 
-      <StatTiles p={portfolio} />
-      <EquityChart p={portfolio} />
-      <Positions p={portfolio} onClosed={refetchPortfolio} />
-      <Recommendations scan={scan} onRescan={runScan} scanning={scanning} />
-      <TradeHistory p={portfolio} />
+      <div className={showConsole ? 'with-console' : ''}>
+        <StatTiles p={portfolio} />
+        <EquityChart p={portfolio} />
+        <Positions p={portfolio} onClosed={refetchPortfolio} />
+        <Recommendations scan={scan} onRescan={runScan} scanning={scanning} />
+        <TradeHistory p={portfolio} />
+      </div>
+
+      <ConsoleDrawer open={showConsole} onClose={() => setShowConsole(false)} />
     </div>
   )
 }
