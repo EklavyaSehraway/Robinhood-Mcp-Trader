@@ -179,8 +179,12 @@ def status():
 
 
 @app.get("/api/portfolio")
-def portfolio():
-    return paper_trader.portfolio_snapshot(use_cached_prices=True)
+async def portfolio():
+    snap = paper_trader.portfolio_snapshot(use_cached_prices=True)
+    # If any position has no cached price yet, trigger a background refresh
+    if any(p.get("current_price") == p.get("entry_price") for p in snap.get("positions", [])):
+        asyncio.ensure_future(asyncio.to_thread(paper_trader.refresh_prices))
+    return snap
 
 
 @app.get("/api/scan")
