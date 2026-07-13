@@ -688,9 +688,35 @@ function TradeHistory({ p }) {
   )
 }
 
+function RefreshCountdown({ status }) {
+  const [secondsLeft, setSecondsLeft] = useState(null)
+
+  useEffect(() => {
+    if (!status?.last_price_refresh_at || !status?.price_refresh_interval) {
+      setSecondsLeft(null)
+      return
+    }
+    const tick = () => {
+      const elapsed = Date.now() / 1000 - status.last_price_refresh_at
+      const left = Math.max(0, Math.round(status.price_refresh_interval - elapsed))
+      setSecondsLeft(left)
+    }
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [status?.last_price_refresh_at, status?.price_refresh_interval])
+
+  if (secondsLeft === null) return null
+  return (
+    <span className="refresh-countdown" title="Time until next price refresh">
+      {secondsLeft === 0 ? 'Refreshing…' : `${secondsLeft}s`}
+    </span>
+  )
+}
+
 export default function App() {
-  const [portfolio, refetchPortfolio] = useApi('/api/portfolio', 60_000)
-  const [status] = useApi('/api/status', 30_000)
+  const [portfolio, refetchPortfolio] = useApi('/api/portfolio', 10_000)
+  const [status] = useApi('/api/status', 5_000)
   const [scan, refetchScan] = useApi('/api/scan', 120_000)
   const [scanning, setScanning] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
@@ -719,6 +745,7 @@ export default function App() {
             <span className={`dot ${status?.market_open ? 'open' : 'closed'}`} />
             {status?.market_open ? 'Market open' : 'Market closed'}
           </span>
+          <RefreshCountdown status={status} />
           <button className="btn-header" onClick={() => setShowGuide(true)}>Setup Guide</button>
           <button className="btn-header" onClick={() => setShowSettings(true)}>Settings</button>
         </div>

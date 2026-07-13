@@ -34,7 +34,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("trader")
 
 SCAN_INTERVAL = 10 * 60
-MANAGE_INTERVAL = 5 * 60
+MANAGE_INTERVAL = 5 * 60       # stop/target/time-exit checks
+PRICE_REFRESH_INTERVAL = 30    # refresh cached quotes every 30s
 
 app = FastAPI(title="Weekly Swing Paper Trader")
 app.add_middleware(
@@ -44,6 +45,7 @@ app.add_middleware(
 _engine_state = {
     "last_scan_at": None,
     "last_manage_at": None,
+    "last_price_refresh_at": None,
     "running": True,
     "errors": [],
 }
@@ -120,8 +122,19 @@ async def scheduler():
     log.info("scheduler started")
     while _engine_state["running"]:
         try:
+            now = time.time()
+
+            # Refresh cached prices every 30s — runs even off-hours so
+            # the dashboard always shows current/last-traded values.
+            last_refresh = _engine_state["last_price_refresh_at"] or 0
+            if now - last_refresh >= PRICE_REFRESH_INTERVAL:
+                try:
+                    await asyncio.to_thread(paper_trader.refresh_prices)
+                except Exception:
+                    pass  # partial failures are fine — some prices may update
+                _engine_state["last_price_refresh_at"] = time.time()
+
             if market_open():
-                now = time.time()
                 et_date = _et_now().strftime("%Y-%m-%d")
 
                 last_manage = _engine_state["last_manage_at"] or 0
@@ -173,7 +186,9 @@ def status():
         "et_time": _et_now().isoformat(),
         "last_scan_at": _engine_state["last_scan_at"],
         "last_manage_at": _engine_state["last_manage_at"],
-        "mode": "paper",
+        "last_price_refresh_at": _engine_state["last_price_refresh_at"],
+        "price_refresh_interval": PRICE_REFRESH_INTERVAL,
+        "mode": paper_trader.load_state().get("mode", "paper"),
         "errors": _engine_state["errors"],
     }
 

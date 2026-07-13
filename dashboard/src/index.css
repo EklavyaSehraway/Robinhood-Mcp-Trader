@@ -165,6 +165,10 @@ button:disabled { opacity: 0.5; cursor: default; }
 .header-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .btn-header { padding: 3px 12px; font-size: 12px; border-radius: 999px; color: var(--text-secondary); }
 .btn-header:hover { color: var(--text-primary); }
+.refresh-countdown {
+  font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums;
+  padding: 2px 8px; border: 1px solid var(--gridline); border-radius: 999px;
+}
 
 .badge-btn {
   background: transparent; cursor: pointer; font-weight: 600;
