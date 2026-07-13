@@ -1,0 +1,24 @@
+# Secrets — never commit
+backend/config.py
+backend/state/
+
+# Python
+backend/venv/
+__pycache__/
+*.pyc
+
+# Node / dashboard build
+dashboard/node_modules/
+dashboard/dist/
+
+# macOS
+.DS_Store
+*.app
+
+# Logs
+*.log
+build.log
+
+# Editor
+.vscode/
+.idea/

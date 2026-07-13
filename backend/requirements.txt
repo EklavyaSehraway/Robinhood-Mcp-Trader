@@ -1,0 +1,8 @@
+fastapi>=0.111
+uvicorn[standard]>=0.30
+yfinance>=0.2.40
+pandas>=2.2
+numpy>=1.26
+lxml
+requests
+anthropic[bedrock]>=0.116
