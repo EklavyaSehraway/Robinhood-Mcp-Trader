@@ -13,6 +13,7 @@ defined before entry. Reward:risk is fixed at 1.6.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import time
 from dataclasses import dataclass, asdict
@@ -23,6 +24,8 @@ import pandas as pd
 import yfinance as yf
 
 from universe import get_universe
+
+log = logging.getLogger("strategy")
 
 STATE_DIR = Path(__file__).parent / "state"
 SCAN_FILE = STATE_DIR / "last_scan.json"
@@ -170,6 +173,8 @@ def _evaluate(sym: str, df: pd.DataFrame, asset_type: str, spy_1m: float):
 def run_scan(top_n: int = 15) -> dict:
     universe = get_universe()
     stocks, etfs = universe["stocks"], universe["etfs"]
+    total = len(set(stocks + etfs + ["SPY"]))
+    log.info("scanning %d symbols (%d stocks + %d ETFs)...", total, len(stocks), len(etfs))
     frames = _download(sorted(set(stocks + etfs + ["SPY"])))
 
     spy = frames.get("SPY")
@@ -194,6 +199,10 @@ def run_scan(top_n: int = 15) -> dict:
             recs.append(rec)
 
     recs.sort(key=lambda r: r.score, reverse=True)
+    log.info("scan complete: %d symbols downloaded, %d candidates found (market_ok=%s)",
+             len(frames), len(recs), market_ok)
+    if recs:
+        log.info("top picks: %s", ", ".join(f"{r.symbol}({r.setup})" for r in recs[:5]))
     result = {
         "scanned": len(frames),
         "market_ok": market_ok,

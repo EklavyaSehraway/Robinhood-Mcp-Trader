@@ -30,7 +30,17 @@ import strategy
 from robinhood_mcp import robinhood
 from universe import get_universe
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)-14s │ %(message)s",
+    datefmt="%H:%M:%S",
+)
+# Quiet down noisy libraries
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+logging.getLogger("peewee").setLevel(logging.WARNING)
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 log = logging.getLogger("trader")
 
 SCAN_INTERVAL = 10 * 60
@@ -119,22 +129,14 @@ def run_scan_with_ai() -> dict:
 
 
 async def scheduler():
-    log.info("scheduler started")
+    log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    log.info("scheduler started — scan every %ds, manage every %ds, prices every %ds",
+             SCAN_INTERVAL, MANAGE_INTERVAL, PRICE_REFRESH_INTERVAL)
+    log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     while _engine_state["running"]:
         try:
-            now = time.time()
-
-            # Refresh cached prices every 30s — runs even off-hours so
-            # the dashboard always shows current/last-traded values.
-            last_refresh = _engine_state["last_price_refresh_at"] or 0
-            if now - last_refresh >= PRICE_REFRESH_INTERVAL:
-                try:
-                    await asyncio.to_thread(paper_trader.refresh_prices)
-                except Exception:
-                    pass  # partial failures are fine — some prices may update
-                _engine_state["last_price_refresh_at"] = time.time()
-
             if market_open():
+                now = time.time()
                 et_date = _et_now().strftime("%Y-%m-%d")
 
                 last_manage = _engine_state["last_manage_at"] or 0
@@ -171,11 +173,27 @@ async def scheduler():
         await asyncio.sleep(30)
 
 
+async def price_loop():
+    """Dedicated loop for 30s price refresh — never blocked by scans."""
+    log.info("price refresh loop started (every %ds)", PRICE_REFRESH_INTERVAL)
+    while _engine_state["running"]:
+        try:
+            await asyncio.to_thread(paper_trader.refresh_prices)
+            _engine_state["last_price_refresh_at"] = time.time()
+            log.info("prices refreshed (%d positions)",
+                     len(paper_trader.load_state()["positions"]))
+        except Exception as e:
+            log.warning("price refresh error: %s", e)
+            _engine_state["last_price_refresh_at"] = time.time()
+        await asyncio.sleep(PRICE_REFRESH_INTERVAL)
+
+
 @app.on_event("startup")
 async def startup():
     # Warm the scan cache on boot if empty so the dashboard has data.
     if strategy.load_last_scan() is None:
         asyncio.create_task(asyncio.to_thread(run_scan_with_ai))
+    asyncio.create_task(price_loop())
     asyncio.create_task(scheduler())
 
 

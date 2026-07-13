@@ -94,13 +94,17 @@ def review_candidates(recs: list[dict], spy_1m: float) -> dict:
         return {"reviewed": False, "market_note": "", "verdicts": {}}
 
     symbols = [r["symbol"] for r in recs]
+    log.info("fetching news for %d candidates: %s", len(symbols), ", ".join(symbols))
     news = fetch_news(symbols)
+    total_headlines = sum(len(v) for v in news.values())
+    log.info("fetched %d headlines across %d symbols", total_headlines, len(news))
 
     client = AnthropicBedrockMantle(
         aws_access_key=config.AWS_ACCESS_KEY_ID,
         aws_secret_key=config.AWS_SECRET_ACCESS_KEY,
         aws_region=config.AWS_REGION,
     )
+    log.info("sending %d candidates to Claude Opus 4.8 for review...", len(recs))
     # Bedrock Mantle rejects output_config.format, so JSON shape is enforced
     # by prompt + schema-in-prompt and parsed tolerantly below.
     json_instruction = (
@@ -139,6 +143,12 @@ def review_candidates(recs: list[dict], spy_1m: float) -> dict:
         for v in data.get("verdicts", [])
         if v.get("symbol") in set(symbols)  # ignore any hallucinated tickers
     }
+    endorse = [s for s, v in verdicts.items() if v["verdict"] == "endorse"]
+    veto = [s for s, v in verdicts.items() if v["verdict"] == "veto"]
+    log.info("AI review done: %d endorse (%s), %d veto (%s), %d neutral",
+             len(endorse), ",".join(endorse) or "none",
+             len(veto), ",".join(veto) or "none",
+             len(verdicts) - len(endorse) - len(veto))
     return {
         "reviewed": True,
         "market_note": data.get("market_note", ""),

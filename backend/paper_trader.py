@@ -17,8 +17,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 
+import logging
 import numpy as np
 import yfinance as yf
+
+log = logging.getLogger("paper_trader")
 
 STATE_DIR = Path(__file__).parent / "state"
 PORTFOLIO_FILE = STATE_DIR / "portfolio.json"
@@ -62,34 +65,28 @@ def save_state(state: dict) -> None:
 
 
 def get_quotes(symbols: list[str]) -> dict[str, float]:
-    """Latest prices via yfinance fast_info; falls back to recent close."""
+    """Latest prices via yfinance. Uses 5-day daily bars (fast, reliable).
+    Designed to be called with a small set of symbols (open positions only)
+    for frequent polling — the full scan handles broader universe pricing."""
     prices: dict[str, float] = {}
     if not symbols:
         return prices
-    data = yf.download(
-        symbols, period="1d", interval="1m", group_by="ticker",
-        auto_adjust=True, threads=True, progress=False,
-    )
-    for sym in symbols:
-        try:
-            df = data[sym] if len(symbols) > 1 else data
-            px = float(df["Close"].dropna().iloc[-1])
-            if not np.isnan(px):
-                prices[sym] = px
-        except Exception:
-            continue
-    missing = [s for s in symbols if s not in prices]
-    if missing:
-        daily = yf.download(
-            missing, period="5d", interval="1d", group_by="ticker",
+    try:
+        data = yf.download(
+            symbols, period="5d", interval="1d", group_by="ticker",
             auto_adjust=True, threads=True, progress=False,
+            timeout=20,
         )
-        for sym in missing:
+        for sym in symbols:
             try:
-                df = daily[sym] if len(missing) > 1 else daily
-                prices[sym] = float(df["Close"].dropna().iloc[-1])
+                df = data[sym] if len(symbols) > 1 else data
+                px = float(df["Close"].dropna().iloc[-1])
+                if not np.isnan(px):
+                    prices[sym] = px
             except Exception:
                 continue
+    except Exception as e:
+        log.warning("batch quote download failed: %s", e)
     return prices
 
 
@@ -157,6 +154,8 @@ def open_positions_from_recs(recs: list[dict], market_ok: bool) -> dict:
             state["positions"].append(pos)
             held.add(sym)
             opened.append(pos)
+            log.info("OPEN  %s x%d @ $%.2f (stop $%.2f, target $%.2f) cost=$%.2f",
+                     sym, shares, px, pos["stop"], pos["target"], cost)
 
         save_state(state)
         return {"opened": opened}
@@ -165,6 +164,8 @@ def open_positions_from_recs(recs: list[dict], market_ok: bool) -> dict:
 def _close(state: dict, pos: dict, px: float, reason: str) -> dict:
     proceeds = pos["shares"] * px
     pnl = proceeds - pos["cost"]
+    log.info("CLOSE %s x%d @ $%.2f (%s) pnl=$%.2f (%.1f%%)",
+             pos["symbol"], pos["shares"], px, reason, pnl, pnl / pos["cost"] * 100)
     trade = {
         **pos,
         "exit_price": round(px, 4),
@@ -244,11 +245,17 @@ def refresh_prices() -> None:
         state = load_state()
         if not state["positions"]:
             return
-        prices = get_quotes([p["symbol"] for p in state["positions"]])
+        symbols = [p["symbol"] for p in state["positions"]]
+        prices = get_quotes(symbols)
+        updated = 0
         for pos in state["positions"]:
             if pos["symbol"] in prices:
                 pos["last_price"] = prices[pos["symbol"]]
+                updated += 1
         save_state(state)
+        if updated < len(symbols):
+            missing = [s for s in symbols if s not in prices]
+            log.warning("quotes missing for: %s", ", ".join(missing))
 
 
 def portfolio_snapshot(use_cached_prices: bool = False) -> dict:
