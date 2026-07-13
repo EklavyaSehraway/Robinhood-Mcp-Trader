@@ -237,9 +237,18 @@ def close_position(position_id: str) -> dict:
         return {"closed": trade}
 
 
-def portfolio_snapshot() -> dict:
+def portfolio_snapshot(use_cached_prices: bool = False) -> dict:
     state = load_state()
-    prices = get_quotes([p["symbol"] for p in state["positions"]]) if state["positions"] else {}
+    if use_cached_prices:
+        # Use entry prices as fallback — instant response, no network call
+        prices = {p["symbol"]: p.get("last_price", p["entry_price"]) for p in state["positions"]}
+    else:
+        prices = get_quotes([p["symbol"] for p in state["positions"]]) if state["positions"] else {}
+        # Cache prices on each position for fast subsequent reads
+        for pos in state["positions"]:
+            if pos["symbol"] in prices:
+                pos["last_price"] = prices[pos["symbol"]]
+        save_state(state)
     eq = equity(state, prices)
     positions = []
     for pos in state["positions"]:

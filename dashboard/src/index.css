@@ -178,6 +178,11 @@ button:disabled { opacity: 0.5; cursor: default; }
   margin-left: 6px; font-weight: 400; font-size: 11px;
   color: var(--text-muted); letter-spacing: 0; text-transform: none;
 }
+.status-ok { color: var(--good); font-weight: 500; margin: 8px 0; }
+.modal-error { color: var(--critical); font-size: 13px; margin-top: 8px; }
+.modal-list { margin: 10px 0 10px 20px; font-size: 13px; color: var(--text-secondary); }
+.modal-list li { margin-bottom: 4px; }
+.preflight-result { margin: 10px 0; }
 
 /* --- Modals --- */
 .modal-backdrop {

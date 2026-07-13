@@ -25,7 +25,9 @@ from fastapi.staticfiles import StaticFiles
 
 import ai_analyst
 import paper_trader
+import live_trader
 import strategy
+from robinhood_mcp import robinhood
 from universe import get_universe
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -178,7 +180,7 @@ def status():
 
 @app.get("/api/portfolio")
 def portfolio():
-    return paper_trader.portfolio_snapshot()
+    return paper_trader.portfolio_snapshot(use_cached_prices=True)
 
 
 @app.get("/api/scan")
@@ -208,17 +210,69 @@ async def set_mode(body: dict):
     mode = body.get("mode", "paper")
     if mode not in ("paper", "live"):
         raise HTTPException(status_code=400, detail="mode must be 'paper' or 'live'")
+    if mode == "live" and not robinhood.is_connected():
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot switch to live: Robinhood MCP is not connected. "
+                   "Use the Setup Guide to connect first.",
+        )
     state = paper_trader.load_state()
     state["mode"] = mode
     paper_trader.save_state(state)
     log.info("trading mode set to: %s", mode)
-    return {"mode": mode, "note": "live trading via Robinhood MCP is not yet connected"}
+    return {"mode": mode, "connected": robinhood.is_connected()}
 
 
 @app.get("/api/mode")
 def get_mode():
     state = paper_trader.load_state()
-    return {"mode": state.get("mode", "paper")}
+    return {
+        "mode": state.get("mode", "paper"),
+        "connected": robinhood.is_connected(),
+    }
+
+
+@app.post("/api/robinhood/connect")
+async def rh_connect():
+    """Initiate Robinhood MCP OAuth connection. Will open a browser for login."""
+    try:
+        result = await robinhood.connect()
+        return result
+    except Exception as e:
+        log.exception("Robinhood MCP connection failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/robinhood/status")
+async def rh_status():
+    """Check if Robinhood MCP is connected and functional."""
+    if not robinhood.is_connected():
+        return {"connected": False}
+    try:
+        check = await robinhood.preflight_check()
+        return {"connected": True, **check}
+    except Exception as e:
+        return {"connected": False, "error": str(e)}
+
+
+@app.post("/api/robinhood/preflight")
+async def rh_preflight():
+    """Run a preflight check: verify account access and quote retrieval.
+    This proves orders CAN be sent before live mode is unlocked."""
+    if not robinhood.is_connected():
+        raise HTTPException(status_code=400, detail="Not connected to Robinhood MCP")
+    result = await robinhood.preflight_check()
+    return result
+
+
+@app.post("/api/robinhood/disconnect")
+async def rh_disconnect():
+    """Disconnect from Robinhood MCP and revert to paper mode."""
+    await robinhood.disconnect()
+    state = paper_trader.load_state()
+    state["mode"] = "paper"
+    paper_trader.save_state(state)
+    return {"connected": False, "mode": "paper"}
 
 
 @app.post("/api/settings/keys")
@@ -255,7 +309,23 @@ def universe():
     return get_universe()
 
 
-# Serve the built React dashboard if present.
+# Serve the React dashboard. We mount at "/ui" for static assets, and
+# manually serve index.html for "/" so API routes aren't shadowed.
 dist = Path(__file__).parent.parent / "dashboard" / "dist"
 if dist.exists():
-    app.mount("/", StaticFiles(directory=str(dist), html=True), name="dashboard")
+    from starlette.responses import FileResponse
+
+    # Static assets (JS/CSS bundles)
+    app.mount("/assets", StaticFiles(directory=str(dist / "assets")), name="assets")
+
+    @app.get("/")
+    async def serve_index():
+        return FileResponse(str(dist / "index.html"))
+
+    @app.get("/{path:path}")
+    async def serve_spa(path: str):
+        # If it's not an API route and the file exists, serve it; else index.html
+        file = dist / path
+        if file.exists() and file.is_file():
+            return FileResponse(str(file))
+        return FileResponse(str(dist / "index.html"))

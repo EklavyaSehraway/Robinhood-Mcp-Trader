@@ -49,21 +49,65 @@ function Modal({ title, onClose, children, danger, wide }) {
 
 function ModeToggle() {
   const [mode, setMode] = useState('paper')
-  const [step, setStep] = useState(null) // 'live-1' | 'live-2' | 'paper' | null
+  const [step, setStep] = useState(null)
   const [acknowledged, setAcknowledged] = useState(false)
+  const [connected, setConnected] = useState(false)
+  const [preflight, setPreflight] = useState(null)
+  const [checking, setChecking] = useState(false)
+  const [error, setError] = useState('')
 
-  const applyMode = (m) => {
-    setMode(m)
-    setStep(null)
-    setAcknowledged(false)
-    fetch('/api/mode', {
+  useEffect(() => {
+    fetch('/api/mode').then(r => r.json()).then(d => {
+      setMode(d.mode || 'paper')
+      setConnected(d.connected || false)
+    }).catch(() => {})
+  }, [])
+
+  const applyMode = async (m) => {
+    setError('')
+    const res = await fetch('/api/mode', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode: m }),
-    }).catch(() => {})
+    })
+    if (res.ok) {
+      setMode(m)
+      setStep(null)
+      setAcknowledged(false)
+      setPreflight(null)
+    } else {
+      const d = await res.json().catch(() => ({}))
+      setError(d.detail || 'Failed to switch mode')
+    }
   }
 
-  const close = () => { setStep(null); setAcknowledged(false) }
+  const runConnect = async () => {
+    setChecking(true); setError('')
+    try {
+      const res = await fetch('/api/robinhood/connect', { method: 'POST' })
+      if (res.ok) {
+        const d = await res.json()
+        setConnected(d.connected || false)
+      } else {
+        const d = await res.json().catch(() => ({}))
+        setError(d.detail || 'Connection failed')
+      }
+    } catch { setError('Connection failed — check console') }
+    finally { setChecking(false) }
+  }
+
+  const runPreflight = async () => {
+    setChecking(true); setError('')
+    try {
+      const res = await fetch('/api/robinhood/preflight', { method: 'POST' })
+      const d = await res.json()
+      setPreflight(d)
+      if (!d.success) setError(d.error || 'Preflight failed')
+    } catch { setError('Preflight check failed') }
+    finally { setChecking(false) }
+  }
+
+  const close = () => { setStep(null); setAcknowledged(false); setPreflight(null); setError('') }
 
   return (
     <>
@@ -73,41 +117,96 @@ function ModeToggle() {
         title="Switch trading mode"
       >
         {mode === 'live' ? 'LIVE TRADING' : 'PAPER TRADING'}
-        {mode === 'live' && <span className="mode-note">(not yet connected)</span>}
       </button>
 
+      {/* Step 1: Connect & understand */}
       {step === 'live-1' && (
-        <Modal title="Switch to Live Trading?" onClose={close} danger>
+        <Modal title="Step 1 of 3 — Connect to Robinhood" onClose={close} danger>
           <p>
-            You are about to switch this dashboard from paper trading to{' '}
-            <strong>live trading</strong>. Trades placed by the engine will use{' '}
-            <strong>real money</strong> from your Robinhood Agentic account.
+            To trade with real money, the app must be connected to your{' '}
+            <strong>Robinhood Agentic account</strong> via the MCP.
           </p>
-          <p className="modal-muted">
-            Make sure you understand the strategy, its risk limits, and your account
-            settings before continuing.
-          </p>
+          {connected ? (
+            <p className="status-ok">✓ Robinhood MCP is connected</p>
+          ) : (
+            <>
+              <p className="modal-muted">
+                Click below to start OAuth. A browser window will open for you to
+                log in to Robinhood and authorize this app.
+              </p>
+              <div className="modal-actions">
+                <button onClick={runConnect} disabled={checking}>
+                  {checking ? 'Connecting…' : 'Connect to Robinhood'}
+                </button>
+              </div>
+            </>
+          )}
+          {error && <p className="modal-error">{error}</p>}
           <div className="modal-actions">
-            <button className="btn-danger-solid" onClick={() => setStep('live-2')}>Continue</button>
+            <button className="btn-danger-solid" onClick={() => { setError(''); setStep('live-2') }} disabled={!connected}>
+              Next
+            </button>
             <button onClick={close}>Cancel</button>
           </div>
         </Modal>
       )}
 
+      {/* Step 2: Preflight verification */}
       {step === 'live-2' && (
-        <Modal title="Are you sure?" onClose={close} danger>
+        <Modal title="Step 2 of 3 — Verify Connection" onClose={close} danger>
           <p>
-            This cannot be undone for this session. The engine will trade with real
-            funds in your Robinhood Agentic account.
+            We need to confirm your account is accessible and orders can be sent.
+            This will query your account info and fetch a live quote — no orders
+            will be placed.
           </p>
+          {preflight?.success ? (
+            <div className="preflight-result">
+              <p className="status-ok">✓ Preflight passed</p>
+              <p className="modal-muted">
+                Account: {preflight.account_number} · Buying power: ${preflight.buying_power} · SPY: ${preflight.spy_price}
+              </p>
+            </div>
+          ) : (
+            <div className="modal-actions">
+              <button onClick={runPreflight} disabled={checking}>
+                {checking ? 'Checking…' : 'Run Preflight Check'}
+              </button>
+            </div>
+          )}
+          {error && <p className="modal-error">{error}</p>}
+          <div className="modal-actions">
+            <button className="btn-danger-solid" onClick={() => { setError(''); setStep('live-3') }} disabled={!preflight?.success}>
+              Next
+            </button>
+            <button onClick={close}>Cancel</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Step 3: Final confirmation */}
+      {step === 'live-3' && (
+        <Modal title="Step 3 of 3 — Final Confirmation" onClose={close} danger>
+          <p>
+            <strong>This is your final confirmation.</strong> Once enabled, the engine
+            will place real buy and sell orders in your Robinhood Agentic account
+            using the same strategy and risk rules as paper mode.
+          </p>
+          <ul className="modal-list">
+            <li>Max position size: 10% of your account</li>
+            <li>Max loss per trade: 5% (hard stop)</li>
+            <li>All orders are limit orders (never market)</li>
+            <li>You can switch back to paper at any time</li>
+          </ul>
           <label className="ack-check">
             <input
               type="checkbox"
               checked={acknowledged}
               onChange={(e) => setAcknowledged(e.target.checked)}
             />
-            I understand real money will be used
+            I understand real money will be used and I accept full responsibility
+            for all trades placed by this system
           </label>
+          {error && <p className="modal-error">{error}</p>}
           <div className="modal-actions">
             <button
               className="btn-danger-solid"
@@ -121,11 +220,13 @@ function ModeToggle() {
         </Modal>
       )}
 
+      {/* Switch BACK to paper */}
       {step === 'paper' && (
         <Modal title="Switch back to Paper Trading?" onClose={close}>
           <p>
-            The engine will stop using real money and return to simulated paper
-            trades.
+            The engine will immediately stop placing real orders and return to
+            simulated paper trades. Existing open positions in Robinhood will
+            NOT be automatically closed — manage those manually if needed.
           </p>
           <div className="modal-actions">
             <button onClick={() => applyMode('paper')}>Switch to Paper</button>
