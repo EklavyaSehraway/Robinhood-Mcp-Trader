@@ -87,7 +87,7 @@ log = logging.getLogger("trader")
 
 SCAN_INTERVAL = 10 * 60
 MANAGE_INTERVAL = 5 * 60       # stop/target/time-exit checks
-PRICE_REFRESH_INTERVAL = 30    # refresh cached quotes every 30s
+PRICE_REFRESH_INTERVAL = 60    # refresh open-position quotes every 60s
 
 app = FastAPI(title="Weekly Swing Paper Trader")
 app.add_middleware(
